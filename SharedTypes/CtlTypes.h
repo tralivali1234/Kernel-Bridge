@@ -50,51 +50,60 @@ namespace Ctls {
         /* 30 */ KbUnmapMemory,
 
         // Physical memory:
-        /* 31 */ KbMapPhysicalMemory,
-        /* 32 */ KbUnmapPhysicalMemory,
-        /* 33 */ KbGetPhysicalAddress,
-        /* 34 */ KbReadPhysicalMemory,
-        /* 35 */ KbWritePhysicalMemory,
-        /* 36 */ KbReadDmiMemory,
+        /* 31 */ KbAllocPhysicalMemory,
+        /* 32 */ KbFreePhysicalMemory,
+        /* 33 */ KbMapPhysicalMemory,
+        /* 34 */ KbUnmapPhysicalMemory,
+        /* 35 */ KbGetPhysicalAddress,
+        /* 36 */ KbGetVirtualForPhysical,
+        /* 37 */ KbReadPhysicalMemory,
+        /* 38 */ KbWritePhysicalMemory,
+        /* 39 */ KbReadDmiMemory,
 
         // Processes & Threads:
-        /* 37 */ KbGetEprocess,
-        /* 38 */ KbGetEthread,
-        /* 39 */ KbOpenProcess,
-        /* 40 */ KbOpenProcessByPointer,
-        /* 41 */ KbOpenThread,
-        /* 42 */ KbOpenThreadByPointer,
-        /* 43 */ KbDereferenceObject,
-        /* 44 */ KbCloseHandle,
-        /* 45 */ KbAllocUserMemory,
-        /* 46 */ KbFreeUserMemory,
-        /* 47 */ KbSecureVirtualMemory,
-        /* 48 */ KbUnsecureVirtualMemory,
-        /* 49 */ KbReadProcessMemory,
-        /* 50 */ KbWriteProcessMemory,
-        /* 51 */ KbSuspendProcess,
-        /* 52 */ KbResumeProcess,
-        /* 53 */ KbGetThreadContext,
-        /* 54 */ KbSetThreadContext,
-        /* 55 */ KbCreateUserThread,
-        /* 56 */ KbCreateSystemThread,
-        /* 57 */ KbQueueUserApc,
-        /* 58 */ KbRaiseIopl,
-        /* 59 */ KbResetIopl,
+        /* 40 */ KbGetEprocess,
+        /* 41 */ KbGetEthread,
+        /* 42 */ KbOpenProcess,
+        /* 43 */ KbOpenProcessByPointer,
+        /* 44 */ KbOpenThread,
+        /* 45 */ KbOpenThreadByPointer,
+        /* 46 */ KbDereferenceObject,
+        /* 47 */ KbCloseHandle,
+        /* 48 */ KbAllocUserMemory,
+        /* 49 */ KbFreeUserMemory,
+        /* 50 */ KbSecureVirtualMemory,
+        /* 51 */ KbUnsecureVirtualMemory,
+        /* 52 */ KbReadProcessMemory,
+        /* 53 */ KbWriteProcessMemory,
+        /* 54 */ KbSuspendProcess,
+        /* 55 */ KbResumeProcess,
+        /* 56 */ KbGetThreadContext,
+        /* 57 */ KbSetThreadContext,
+        /* 58 */ KbCreateUserThread,
+        /* 59 */ KbCreateSystemThread,
+        /* 60 */ KbQueueUserApc,
+        /* 61 */ KbRaiseIopl,
+        /* 62 */ KbResetIopl,
+
+        // Sections:
+        /* 63 */ KbCreateSection,
+        /* 64 */ KbOpenSection,
+        /* 65 */ KbMapViewOfSection,
+        /* 66 */ KbUnmapViewOfSection,
 
         // Loadable modules:
-        /* 60 */ KbCreateDriver,
-        /* 61 */ KbLoadModule,
-        /* 62 */ KbGetModuleHandle,
-        /* 63 */ KbCallModule,
-        /* 64 */ KbUnloadModule,
+        /* 67 */ KbCreateDriver,
+        /* 68 */ KbLoadModule,
+        /* 69 */ KbGetModuleHandle,
+        /* 70 */ KbCallModule,
+        /* 71 */ KbUnloadModule,
 
         // Stuff u kn0w:
-        /* 65 */ KbExecuteShellCode,
-        /* 66 */ KbGetKernelProcAddress,
-        /* 67 */ KbStallExecutionProcessor,
-        /* 68 */ KbBugCheck,
-        /* 69 */ KbFindSignature
+        /* 72 */ KbExecuteShellCode,
+        /* 73 */ KbGetKernelProcAddress,
+        /* 74 */ KbStallExecutionProcessor,
+        /* 75 */ KbBugCheck,
+        /* 76 */ KbFindSignature
     };
 }
 
@@ -284,9 +293,26 @@ DECLARE_STRUCT(KB_UNMAP_MEMORY_IN, {
     WdkTypes::PMDL Mdl;
 });
 
+DECLARE_STRUCT(KB_ALLOC_PHYSICAL_MEMORY_IN, {
+    WdkTypes::PVOID LowestAcceptableAddress;
+    WdkTypes::PVOID HighestAcceptableAddress;
+    WdkTypes::PVOID BoundaryAddressMultiple;
+    ULONG Size;
+    WdkTypes::MEMORY_CACHING_TYPE CachingType;
+});
+
+DECLARE_STRUCT(KB_ALLOC_PHYSICAL_MEMORY_OUT, {
+    WdkTypes::PVOID Address;
+});
+
+DECLARE_STRUCT(KB_FREE_PHYSICAL_MEMORY_IN, {
+    WdkTypes::PVOID Address;    
+});
+
 DECLARE_STRUCT(KB_MAP_PHYSICAL_MEMORY_IN, {
     WdkTypes::PVOID PhysicalAddress;
     ULONG Size;
+    WdkTypes::MEMORY_CACHING_TYPE CachingType;
 });
 
 DECLARE_STRUCT(KB_MAP_PHYSICAL_MEMORY_OUT, {
@@ -307,18 +333,19 @@ DECLARE_STRUCT(KB_GET_PHYSICAL_ADDRESS_OUT, {
     WdkTypes::PVOID PhysicalAddress;
 });
 
-DECLARE_STRUCT(KB_READ_PHYSICAL_MEMORY_IN, {
+DECLARE_STRUCT(KB_GET_VIRTUAL_FOR_PHYSICAL_IN, {
+    WdkTypes::PVOID PhysicalAddress; 
+});
+
+DECLARE_STRUCT(KB_GET_VIRTUAL_FOR_PHYSICAL_OUT, {
+    WdkTypes::PVOID VirtualAddress;
+});
+
+DECLARE_STRUCT(KB_READ_WRITE_PHYSICAL_MEMORY_IN, {
     WdkTypes::PVOID PhysicalAddress;
-});
-
-DECLARE_STRUCT(KB_READ_PHYSICAL_MEMORY_OUT, {
-    UCHAR Buffer[1];
-});
-
-DECLARE_STRUCT(KB_WRITE_PHYSICAL_MEMORY_IN, {
-    WdkTypes::PVOID64 PhysicalAddress;
     WdkTypes::PVOID Buffer;
     ULONG Size;
+    WdkTypes::MEMORY_CACHING_TYPE CachingType;
 });
 
 constexpr int DmiSize = 65536;
@@ -456,6 +483,49 @@ DECLARE_STRUCT(KB_QUEUE_USER_APC_IN, {
     UINT64 ThreadId;
     WdkTypes::PVOID ApcProc;
     WdkTypes::PVOID Argument;
+});
+
+DECLARE_STRUCT(KB_CREATE_SECTION_IN, {
+    OPTIONAL WdkTypes::LPCWSTR Name;
+    UINT64 MaximumSize;
+    ACCESS_MASK DesiredAccess;
+    ULONG SecObjFlags; // OBJ_***
+    ULONG SecPageProtection;
+    ULONG AllocationAttributes;
+    OPTIONAL WdkTypes::HANDLE hFile;
+});
+
+DECLARE_STRUCT(KB_OPEN_SECTION_IN, {
+    WdkTypes::LPCWSTR Name;
+    ACCESS_MASK DesiredAccess;
+    ULONG SecObjFlags; // OBJ_***
+});
+
+DECLARE_STRUCT(KB_CREATE_OPEN_SECTION_OUT, {
+    WdkTypes::HANDLE hSection;
+});
+
+DECLARE_STRUCT(KB_MAP_VIEW_OF_SECTION_IN, {
+    WdkTypes::HANDLE hSection;
+    WdkTypes::HANDLE hProcess;
+    IN WdkTypes::PVOID BaseAddress;
+    ULONG CommitSize;
+    UINT64 SectionOffset;
+    UINT64 ViewSize;
+    WdkTypes::SECTION_INHERIT SectionInherit;
+    ULONG AllocationType;
+    ULONG Win32Protect;
+});
+
+DECLARE_STRUCT(KB_MAP_VIEW_OF_SECTION_OUT, {
+    WdkTypes::PVOID BaseAddress;
+    UINT64 SectionOffset;
+    UINT64 ViewSize;
+});
+
+DECLARE_STRUCT(KB_UNMAP_VIEW_OF_SECTION_IN, {
+    WdkTypes::HANDLE hProcess;
+    WdkTypes::PVOID BaseAddress;
 });
 
 DECLARE_STRUCT(KB_EXECUTE_SHELL_CODE_IN, {

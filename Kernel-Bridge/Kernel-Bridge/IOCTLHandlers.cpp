@@ -9,6 +9,7 @@
 
 #include "../API/MemoryUtils.h"
 #include "../API/ProcessesUtils.h"
+#include "../API/SectionsUtils.h"
 #include "../API/IO.h"
 #include "../API/CPU.h"
 #include "../API/Importer.h"
@@ -617,6 +618,44 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS FASTCALL KbAllocPhysicalMemory(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        if (
+            RequestInfo->InputBufferSize != sizeof(KB_ALLOC_PHYSICAL_MEMORY_IN) || 
+            RequestInfo->OutputBufferSize != sizeof(KB_ALLOC_PHYSICAL_MEMORY_OUT)
+        ) return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_ALLOC_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
+        auto Output = static_cast<PKB_ALLOC_PHYSICAL_MEMORY_OUT>(RequestInfo->OutputBuffer);
+
+        if (!Input || !Input->Size || !Output) return STATUS_INVALID_PARAMETER;
+
+        Output->Address = reinterpret_cast<WdkTypes::PVOID>(PhysicalMemory::AllocPhysicalMemorySpecifyCache(
+            reinterpret_cast<PVOID64>(Input->LowestAcceptableAddress),
+            reinterpret_cast<PVOID64>(Input->LowestAcceptableAddress),
+            reinterpret_cast<PVOID64>(Input->LowestAcceptableAddress),
+            Input->Size,
+            static_cast<MEMORY_CACHING_TYPE>(Input->CachingType)
+        ));
+
+        *ResponseLength = sizeof(*Output);
+        return Output->Address ? STATUS_SUCCESS : STATUS_MEMORY_NOT_ALLOCATED;
+    }
+
+    NTSTATUS FASTCALL KbFreePhysicalMemory(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        UNREFERENCED_PARAMETER(ResponseLength);
+
+        if (RequestInfo->InputBufferSize != sizeof(KB_FREE_PHYSICAL_MEMORY_IN))
+            return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_FREE_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
+        if (!Input || !Input->Address) return STATUS_INVALID_PARAMETER;
+
+        PhysicalMemory::FreePhysicalMemory(reinterpret_cast<PVOID>(Input->Address));
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS FASTCALL KbMapPhysicalMemory(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
     {
         if (
@@ -632,7 +671,8 @@ namespace
         Output->VirtualAddress = reinterpret_cast<WdkTypes::PVOID>(
             PhysicalMemory::MapPhysicalMemory(
                 reinterpret_cast<PVOID64>(Input->PhysicalAddress),
-                Input->Size
+                Input->Size,
+                static_cast<MEMORY_CACHING_TYPE>(Input->CachingType)
             )
         );
 
@@ -687,22 +727,42 @@ namespace
             : STATUS_UNSUCCESSFUL;
     }
 
+    NTSTATUS FASTCALL KbGetVirtualForPhysical(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        if (
+            RequestInfo->InputBufferSize != sizeof(KB_GET_VIRTUAL_FOR_PHYSICAL_IN) || 
+            RequestInfo->OutputBufferSize != sizeof(KB_GET_VIRTUAL_FOR_PHYSICAL_OUT)
+        ) return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_GET_VIRTUAL_FOR_PHYSICAL_IN>(RequestInfo->InputBuffer);
+        auto Output = static_cast<PKB_GET_VIRTUAL_FOR_PHYSICAL_OUT>(RequestInfo->OutputBuffer);
+
+        if (!Input || !Output) return STATUS_INVALID_PARAMETER;
+
+        Output->VirtualAddress = reinterpret_cast<WdkTypes::PVOID>(
+            PhysicalMemory::GetVirtualForPhysical(reinterpret_cast<PVOID64>(Input->PhysicalAddress))
+        );
+
+        *ResponseLength = sizeof(*Output);
+        return STATUS_SUCCESS;
+    }
+
     NTSTATUS FASTCALL KbReadPhysicalMemory(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
     {
         UNREFERENCED_PARAMETER(ResponseLength);
 
-        auto Input = static_cast<PKB_READ_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
-        auto Output = static_cast<PKB_READ_PHYSICAL_MEMORY_OUT>(RequestInfo->OutputBuffer);
-
-        if (!Input || !Output) return STATUS_INVALID_PARAMETER;
-
-        if (RequestInfo->InputBufferSize != sizeof(KB_READ_PHYSICAL_MEMORY_IN)) 
+        auto Input = static_cast<PKB_READ_WRITE_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
+        
+        if (RequestInfo->InputBufferSize != sizeof(KB_READ_WRITE_PHYSICAL_MEMORY_IN)) 
             return STATUS_INFO_LENGTH_MISMATCH;
+
+        if (!Input || !Input->Buffer || !Input->Size) return STATUS_INVALID_PARAMETER;
 
         return PhysicalMemory::ReadPhysicalMemory(
             reinterpret_cast<PVOID64>(Input->PhysicalAddress),
-            reinterpret_cast<PVOID>(&Output->Buffer),
-            RequestInfo->OutputBufferSize
+            reinterpret_cast<PVOID>(Input->Buffer),
+            Input->Size,
+            static_cast<MEMORY_CACHING_TYPE>(Input->CachingType)
         ) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
     }
 
@@ -710,16 +770,17 @@ namespace
     {
         UNREFERENCED_PARAMETER(ResponseLength);
 
-        if (RequestInfo->InputBufferSize < sizeof(KB_WRITE_PHYSICAL_MEMORY_IN))
+        if (RequestInfo->InputBufferSize < sizeof(KB_READ_WRITE_PHYSICAL_MEMORY_IN))
             return STATUS_INFO_LENGTH_MISMATCH;
 
-        auto Input = static_cast<PKB_WRITE_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
+        auto Input = static_cast<PKB_READ_WRITE_PHYSICAL_MEMORY_IN>(RequestInfo->InputBuffer);
         if (!Input || !Input->Buffer || !Input->Size) return STATUS_INVALID_PARAMETER;
 
         return PhysicalMemory::WritePhysicalMemory(
             reinterpret_cast<PVOID64>(Input->PhysicalAddress),
             reinterpret_cast<PVOID>(Input->Buffer),
-            Input->Size
+            Input->Size,
+            static_cast<MEMORY_CACHING_TYPE>(Input->CachingType)
         ) ? STATUS_SUCCESS : STATUS_UNSUCCESSFUL;
     }
 
@@ -1420,6 +1481,110 @@ namespace
         return STATUS_SUCCESS;
     }
 
+    NTSTATUS FASTCALL KbCreateSection(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        if (
+            RequestInfo->InputBufferSize != sizeof(KB_CREATE_SECTION_IN) || 
+            RequestInfo->OutputBufferSize != sizeof(KB_CREATE_OPEN_SECTION_OUT)
+        ) return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_CREATE_SECTION_IN>(RequestInfo->InputBuffer);
+        auto Output = static_cast<PKB_CREATE_OPEN_SECTION_OUT>(RequestInfo->OutputBuffer);
+
+        if (!Input || !Output) return STATUS_INVALID_PARAMETER;
+
+        HANDLE hSection = NULL;
+        NTSTATUS Status = Sections::CreateSection(
+            &hSection,
+            reinterpret_cast<LPCWSTR>(Input->Name),
+            Input->MaximumSize,
+            Input->DesiredAccess,
+            Input->SecObjFlags,
+            Input->SecPageProtection,
+            Input->AllocationAttributes,
+            reinterpret_cast<HANDLE>(Input->hFile)
+        );
+
+        Output->hSection = reinterpret_cast<WdkTypes::HANDLE>(hSection);
+        *ResponseLength = sizeof(*Output);
+        return Status;
+    }
+
+    NTSTATUS FASTCALL KbOpenSection(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        if (
+            RequestInfo->InputBufferSize != sizeof(KB_OPEN_SECTION_IN) || 
+            RequestInfo->OutputBufferSize != sizeof(KB_CREATE_OPEN_SECTION_OUT)
+        ) return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_OPEN_SECTION_IN>(RequestInfo->InputBuffer);
+        auto Output = static_cast<PKB_CREATE_OPEN_SECTION_OUT>(RequestInfo->OutputBuffer);
+
+        if (!Input || !Output || !Input->Name) return STATUS_INVALID_PARAMETER;
+
+        HANDLE hSection = NULL;
+        NTSTATUS Status = Sections::OpenSection(
+            &hSection,
+            reinterpret_cast<LPCWSTR>(Input->Name),
+            Input->DesiredAccess,
+            Input->SecObjFlags
+        );
+
+        Output->hSection = reinterpret_cast<WdkTypes::HANDLE>(hSection);
+        *ResponseLength = sizeof(*Output);
+        return Status;
+    }
+
+    NTSTATUS FASTCALL KbMapViewOfSection(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        if (
+            RequestInfo->InputBufferSize != sizeof(KB_MAP_VIEW_OF_SECTION_IN) || 
+            RequestInfo->OutputBufferSize != sizeof(KB_MAP_VIEW_OF_SECTION_OUT)
+        ) return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_MAP_VIEW_OF_SECTION_IN>(RequestInfo->InputBuffer);
+        auto Output = static_cast<PKB_MAP_VIEW_OF_SECTION_OUT>(RequestInfo->OutputBuffer);
+
+        if (!Input || !Output || !Input->hSection) return STATUS_INVALID_PARAMETER;
+
+        PVOID BaseAddress = reinterpret_cast<PVOID>(Input->BaseAddress);
+        UINT64 SectionOffset = static_cast<UINT64>(Input->SectionOffset);
+        SIZE_T ViewSize = static_cast<SIZE_T>(Input->ViewSize);
+        NTSTATUS Status = Sections::MapViewOfSection(
+            reinterpret_cast<HANDLE>(Input->hSection),
+            reinterpret_cast<HANDLE>(Input->hProcess),
+            &BaseAddress,
+            static_cast<SIZE_T>(Input->CommitSize),
+            &SectionOffset,
+            &ViewSize,
+            static_cast<SECTION_INHERIT>(Input->SectionInherit),
+            Input->AllocationType,
+            Input->Win32Protect
+        );
+
+        Output->BaseAddress = reinterpret_cast<WdkTypes::PVOID>(BaseAddress);
+        Output->SectionOffset = SectionOffset;
+        Output->ViewSize = ViewSize;
+        *ResponseLength = sizeof(*Output);
+        return Status;
+    }
+
+    NTSTATUS FASTCALL KbUnmapViewOfSection(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
+    {
+        UNREFERENCED_PARAMETER(ResponseLength);
+
+        if (RequestInfo->InputBufferSize != sizeof(KB_UNMAP_VIEW_OF_SECTION_IN))
+            return STATUS_INFO_LENGTH_MISMATCH;
+
+        auto Input = static_cast<PKB_UNMAP_VIEW_OF_SECTION_IN>(RequestInfo->InputBuffer);
+        if (!Input) return STATUS_INVALID_PARAMETER;
+
+        return Sections::UnmapViewOfSection(
+            reinterpret_cast<HANDLE>(Input->hProcess),
+            reinterpret_cast<PVOID>(Input->BaseAddress)
+        );
+    }
+
     NTSTATUS FASTCALL KbExecuteShellCode(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T ResponseLength)
     {
         if (
@@ -1853,51 +2018,60 @@ NTSTATUS FASTCALL DispatchIOCTL(IN PIOCTL_INFO RequestInfo, OUT PSIZE_T Response
         /* 30 */ KbUnmapMemory,
 
         // Physical memory:
-        /* 31 */ KbMapPhysicalMemory,
-        /* 32 */ KbUnmapPhysicalMemory,
-        /* 33 */ KbGetPhysicalAddress,
-        /* 34 */ KbReadPhysicalMemory,
-        /* 35 */ KbWritePhysicalMemory,
-        /* 36 */ KbReadDmiMemory,
+        /* 31 */ KbAllocPhysicalMemory,
+        /* 32 */ KbFreePhysicalMemory,
+        /* 33 */ KbMapPhysicalMemory,
+        /* 34 */ KbUnmapPhysicalMemory,
+        /* 35 */ KbGetPhysicalAddress,
+        /* 36 */ KbGetVirtualForPhysical,
+        /* 37 */ KbReadPhysicalMemory,
+        /* 38 */ KbWritePhysicalMemory,
+        /* 39 */ KbReadDmiMemory,
 
         // Processes & Threads:
-        /* 37 */ KbGetEprocess,
-        /* 38 */ KbGetEthread,
-        /* 39 */ KbOpenProcess,
-        /* 40 */ KbOpenProcessByPointer,
-        /* 41 */ KbOpenThread,
-        /* 42 */ KbOpenThreadByPointer,
-        /* 43 */ KbDereferenceObject,
-        /* 44 */ KbCloseHandle,
-        /* 45 */ KbAllocUserMemory,
-        /* 46 */ KbFreeUserMemory,
-        /* 47 */ KbSecureVirtualMemory,
-        /* 48 */ KbUnsecureVirtualMemory,
-        /* 49 */ KbReadProcessMemory,
-        /* 50 */ KbWriteProcessMemory,
-        /* 51 */ KbSuspendProcess,
-        /* 52 */ KbResumeProcess,
-        /* 53 */ KbGetThreadContext,
-        /* 54 */ KbSetThreadContext,
-        /* 55 */ KbCreateUserThread,
-        /* 56 */ KbCreateSystemThread,
-        /* 57 */ KbQueueUserApc,
-        /* 58 */ KbRaiseIopl,
-        /* 59 */ KbResetIopl,
+        /* 40 */ KbGetEprocess,
+        /* 41 */ KbGetEthread,
+        /* 42 */ KbOpenProcess,
+        /* 43 */ KbOpenProcessByPointer,
+        /* 44 */ KbOpenThread,
+        /* 45 */ KbOpenThreadByPointer,
+        /* 46 */ KbDereferenceObject,
+        /* 47 */ KbCloseHandle,
+        /* 48 */ KbAllocUserMemory,
+        /* 49 */ KbFreeUserMemory,
+        /* 50 */ KbSecureVirtualMemory,
+        /* 51 */ KbUnsecureVirtualMemory,
+        /* 52 */ KbReadProcessMemory,
+        /* 53 */ KbWriteProcessMemory,
+        /* 54 */ KbSuspendProcess,
+        /* 55 */ KbResumeProcess,
+        /* 56 */ KbGetThreadContext,
+        /* 57 */ KbSetThreadContext,
+        /* 58 */ KbCreateUserThread,
+        /* 59 */ KbCreateSystemThread,
+        /* 60 */ KbQueueUserApc,
+        /* 61 */ KbRaiseIopl,
+        /* 62 */ KbResetIopl,
+
+        // Sections:
+        /* 63 */ KbCreateSection,
+        /* 64 */ KbOpenSection,
+        /* 65 */ KbMapViewOfSection,
+        /* 66 */ KbUnmapViewOfSection,
 
         // Loadable modules:
-        /* 60 */ KbCreateDriver,
-        /* 61 */ KbLoadModule,
-        /* 62 */ KbGetModuleHandle,
-        /* 63 */ KbCallModule,
-        /* 64 */ KbUnloadModule,
+        /* 67 */ KbCreateDriver,
+        /* 68 */ KbLoadModule,
+        /* 69 */ KbGetModuleHandle,
+        /* 70 */ KbCallModule,
+        /* 71 */ KbUnloadModule,
 
         // Stuff u kn0w:
-        /* 65 */ KbExecuteShellCode,
-        /* 66 */ KbGetKernelProcAddress,
-        /* 67 */ KbStallExecutionProcessor,
-        /* 68 */ KbBugCheck,
-        /* 69 */ KbFindSignature
+        /* 72 */ KbExecuteShellCode,
+        /* 73 */ KbGetKernelProcAddress,
+        /* 74 */ KbStallExecutionProcessor,
+        /* 75 */ KbBugCheck,
+        /* 76 */ KbFindSignature
     };
 
     USHORT Index = EXTRACT_CTL_CODE(RequestInfo->ControlCode) - CTL_BASE;

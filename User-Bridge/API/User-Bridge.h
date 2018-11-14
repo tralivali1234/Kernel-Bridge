@@ -139,10 +139,27 @@ namespace Mdl {
 }
 
 namespace PhysicalMemory {
+    // Allocates contiguous physical memory in the specified range:
+    BOOL WINAPI KbAllocPhysicalMemory(
+        WdkTypes::PVOID LowestAcceptableAddress,
+        WdkTypes::PVOID HighestAcceptableAddress,
+        WdkTypes::PVOID BoundaryAddressMultiple,
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType,
+        OUT WdkTypes::PVOID* Address
+    );
+
+    BOOL WINAPI KbFreePhysicalMemory(WdkTypes::PVOID Address);
+
     // Maps physical memory to a KERNEL address-space, so if you
     // wants to work with it in usermode, you should map it to usermode
     // by Mdl::MapMemory:
-    BOOL WINAPI KbMapPhysicalMemory(IN WdkTypes::PVOID PhysicalAddress, ULONG Size, OUT WdkTypes::PVOID* VirtualAddress);
+    BOOL WINAPI KbMapPhysicalMemory(
+        IN WdkTypes::PVOID PhysicalAddress,
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType,
+        OUT WdkTypes::PVOID* VirtualAddress
+    );
     BOOL WINAPI KbUnmapPhysicalMemory(IN WdkTypes::PVOID VirtualAddress, ULONG Size);
     
     // Obtains physical address for specified virtual address 
@@ -152,10 +169,25 @@ namespace PhysicalMemory {
         IN WdkTypes::PVOID VirtualAddress,
         OUT WdkTypes::PVOID* PhysicalAddress
     );
-    
+
+    BOOL WINAPI KbGetVirtualForPhysical(
+        IN WdkTypes::PVOID PhysicalAddress, 
+        OUT WdkTypes::PVOID* VirtualAddress    
+    );
+
     // Reads and writes raw physical memory to buffer in context of current process:
-    BOOL WINAPI KbReadPhysicalMemory(WdkTypes::PVOID64 PhysicalAddress, OUT PVOID Buffer, ULONG Size);
-    BOOL WINAPI KbWritePhysicalMemory(WdkTypes::PVOID64 PhysicalAddress, IN PVOID Buffer, ULONG Size);
+    BOOL WINAPI KbReadPhysicalMemory(
+        WdkTypes::PVOID64 PhysicalAddress,
+        OUT PVOID Buffer,
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType = WdkTypes::MmNonCached
+    );
+    BOOL WINAPI KbWritePhysicalMemory(
+        WdkTypes::PVOID64 PhysicalAddress,
+        IN PVOID Buffer,
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType = WdkTypes::MmNonCached
+    );
     
     BOOL WINAPI KbReadDmiMemory(OUT UCHAR DmiMemory[DmiSize], ULONG BufferSize);
 }
@@ -236,6 +268,43 @@ namespace Processes {
         using _ApcProc = VOID(WINAPI*)(PVOID Argument);
         BOOL WINAPI KbQueueUserApc(ULONG ThreadId, _ApcProc ApcProc, PVOID Argument);
     }
+}
+
+namespace Sections {
+    BOOL WINAPI KbCreateSection(
+        OUT WdkTypes::HANDLE* hSection,
+        OPTIONAL LPCWSTR Name,
+        UINT64 MaximumSize,
+        ACCESS_MASK DesiredAccess,
+        ULONG SecObjFlags, // OBJ_***
+        ULONG SecPageProtection, // SEC_***
+        ULONG AllocationAttributes,
+        OPTIONAL WdkTypes::HANDLE hFile
+    );
+
+    BOOL WINAPI KbOpenSection(
+        OUT WdkTypes::HANDLE* hSection,
+        LPCWSTR Name,
+        ACCESS_MASK DesiredAccess,
+        ULONG SecObjFlags // OBJ_***
+    );
+
+    BOOL WINAPI KbMapViewOfSection(
+        WdkTypes::HANDLE hSection,
+        WdkTypes::HANDLE hProcess,
+        IN OUT WdkTypes::PVOID* BaseAddress,
+        ULONG CommitSize,
+        IN OUT OPTIONAL UINT64* SectionOffset = NULL,
+        IN OUT OPTIONAL UINT64* ViewSize = NULL,
+        WdkTypes::SECTION_INHERIT SectionInherit = WdkTypes::ViewUnmap,
+        ULONG AllocationType = MEM_RESERVE,
+        ULONG Win32Protect = PAGE_READWRITE
+    );
+
+    BOOL WINAPI KbUnmapViewOfSection(
+        WdkTypes::HANDLE hProcess,
+        WdkTypes::PVOID BaseAddress
+    );
 }
 
 namespace KernelShells {

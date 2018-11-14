@@ -455,12 +455,46 @@ namespace Mdl {
 }
 
 namespace PhysicalMemory {
-    BOOL WINAPI KbMapPhysicalMemory(IN WdkTypes::PVOID PhysicalAddress, ULONG Size, OUT WdkTypes::PVOID* VirtualAddress) {
+    BOOL WINAPI KbAllocPhysicalMemory(
+        WdkTypes::PVOID LowestAcceptableAddress,
+        WdkTypes::PVOID HighestAcceptableAddress,
+        WdkTypes::PVOID BoundaryAddressMultiple,
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType,
+        OUT WdkTypes::PVOID* Address
+    ) {
+        if (!Size || !Address) return FALSE;
+        KB_ALLOC_PHYSICAL_MEMORY_IN Input = {};
+        KB_ALLOC_PHYSICAL_MEMORY_OUT Output = {};
+        Input.LowestAcceptableAddress = LowestAcceptableAddress;
+        Input.HighestAcceptableAddress = HighestAcceptableAddress;
+        Input.BoundaryAddressMultiple = BoundaryAddressMultiple;
+        Input.Size = Size;
+        Input.CachingType = CachingType;
+        BOOL Status = KbSendRequest(Ctls::KbAllocPhysicalMemory, &Input, sizeof(Input), &Output, sizeof(Output));
+        *Address = Output.Address;
+        return Status;
+    }
+
+    BOOL WINAPI KbFreePhysicalMemory(WdkTypes::PVOID Address) {
+        if (!Address) return FALSE;
+        KB_FREE_PHYSICAL_MEMORY_IN Input = {};
+        Input.Address = Address;
+        return KbSendRequest(Ctls::KbFreePhysicalMemory, &Input, sizeof(Input));
+    }
+
+    BOOL WINAPI KbMapPhysicalMemory(
+        IN WdkTypes::PVOID PhysicalAddress, 
+        ULONG Size, 
+        WdkTypes::MEMORY_CACHING_TYPE CachingType,
+        OUT WdkTypes::PVOID* VirtualAddress
+    ) {
         if (!Size || !VirtualAddress) return FALSE;
         KB_MAP_PHYSICAL_MEMORY_IN Input = {};
         KB_MAP_PHYSICAL_MEMORY_OUT Output = {};
         Input.PhysicalAddress = PhysicalAddress;
         Input.Size = Size;
+        Input.CachingType = CachingType;
         BOOL Status = KbSendRequest(Ctls::KbMapPhysicalMemory, &Input, sizeof(Input), &Output, sizeof(Output));
         *VirtualAddress = Output.VirtualAddress;
         return Status;
@@ -489,28 +523,46 @@ namespace PhysicalMemory {
         return Status;
     }
 
+    BOOL WINAPI KbGetVirtualForPhysical(
+        IN WdkTypes::PVOID PhysicalAddress, 
+        OUT WdkTypes::PVOID* VirtualAddress    
+    ) {
+        if (!VirtualAddress) return FALSE;
+        KB_GET_VIRTUAL_FOR_PHYSICAL_IN Input = {};
+        KB_GET_VIRTUAL_FOR_PHYSICAL_OUT Output = {};
+        Input.PhysicalAddress = PhysicalAddress;
+        BOOL Status = KbSendRequest(Ctls::KbGetVirtualForPhysical, &Input, sizeof(Input), &Output, sizeof(Output));
+        *VirtualAddress = Output.VirtualAddress;
+        return Status;
+    }
+
     BOOL WINAPI KbReadPhysicalMemory(
         WdkTypes::PVOID64 PhysicalAddress,
         OUT PVOID Buffer,
-        ULONG Size
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType
     ) {
         if (!Buffer || !Size) return FALSE;
-        KB_READ_PHYSICAL_MEMORY_IN Input = {};
+        KB_READ_WRITE_PHYSICAL_MEMORY_IN Input = {};
         Input.PhysicalAddress = PhysicalAddress;
-        auto Output = reinterpret_cast<PKB_READ_PHYSICAL_MEMORY_OUT>(Buffer);
-        return KbSendRequest(Ctls::KbReadPhysicalMemory, &Input, sizeof(Input), Output, Size);
+        Input.Buffer = reinterpret_cast<WdkTypes::PVOID>(Buffer);
+        Input.Size = Size;
+        Input.CachingType = CachingType;
+        return KbSendRequest(Ctls::KbReadPhysicalMemory, &Input, sizeof(Input));
     }
 
     BOOL WINAPI KbWritePhysicalMemory(
         WdkTypes::PVOID64 PhysicalAddress,
         IN PVOID Buffer,
-        ULONG Size
+        ULONG Size,
+        WdkTypes::MEMORY_CACHING_TYPE CachingType
     ) {
         if (!Buffer || !Size) return FALSE;
-        KB_WRITE_PHYSICAL_MEMORY_IN Input = {};
+        KB_READ_WRITE_PHYSICAL_MEMORY_IN Input = {};
         Input.PhysicalAddress = PhysicalAddress;
         Input.Buffer = reinterpret_cast<WdkTypes::PVOID>(Buffer);
         Input.Size = Size;
+        Input.CachingType = CachingType;
         return KbSendRequest(Ctls::KbWritePhysicalMemory, &Input, sizeof(Input));
     }
 
@@ -777,6 +829,90 @@ namespace Processes {
             Input.Argument = reinterpret_cast<WdkTypes::PVOID>(Argument);
             return KbSendRequest(Ctls::KbQueueUserApc, &Input, sizeof(Input));
         }
+    }
+}
+
+namespace Sections {
+    BOOL WINAPI KbCreateSection(
+        OUT WdkTypes::HANDLE* hSection,
+        OPTIONAL LPCWSTR Name,
+        UINT64 MaximumSize,
+        ACCESS_MASK DesiredAccess,
+        ULONG SecObjFlags, // OBJ_***
+        ULONG SecPageProtection,
+        ULONG AllocationAttributes,
+        OPTIONAL WdkTypes::HANDLE hFile
+    ) {
+        if (!hSection) return FALSE;
+        KB_CREATE_SECTION_IN Input = {};
+        KB_CREATE_OPEN_SECTION_OUT Output = {};
+        Input.Name = reinterpret_cast<WdkTypes::LPCWSTR>(Name);
+        Input.MaximumSize = MaximumSize;
+        Input.DesiredAccess = DesiredAccess;
+        Input.SecObjFlags = SecObjFlags;
+        Input.SecPageProtection = SecPageProtection;
+        Input.AllocationAttributes = AllocationAttributes;
+        Input.hFile = hFile;
+        BOOL Status = KbSendRequest(Ctls::KbCreateSection, &Input, sizeof(Input), &Output, sizeof(Output));
+        *hSection = Output.hSection;
+        return Status;
+    }
+
+    BOOL WINAPI KbOpenSection(
+        OUT WdkTypes::HANDLE* hSection,
+        LPCWSTR Name,
+        ACCESS_MASK DesiredAccess,
+        ULONG SecObjFlags // OBJ_***
+    ) {
+        if (!hSection) return FALSE;
+        KB_OPEN_SECTION_IN Input = {};
+        KB_CREATE_OPEN_SECTION_OUT Output = {};
+        Input.Name = reinterpret_cast<WdkTypes::LPCWSTR>(Name);
+        Input.DesiredAccess = DesiredAccess;
+        Input.SecObjFlags = SecObjFlags;
+        BOOL Status = KbSendRequest(Ctls::KbOpenSection, &Input, sizeof(Input), &Output, sizeof(Output));
+        *hSection = Output.hSection;
+        return Status;
+    }
+
+    BOOL WINAPI KbMapViewOfSection(
+        WdkTypes::HANDLE hSection,
+        WdkTypes::HANDLE hProcess,
+        IN OUT WdkTypes::PVOID* BaseAddress,
+        ULONG CommitSize,
+        IN OUT OPTIONAL UINT64* SectionOffset,
+        IN OUT OPTIONAL UINT64* ViewSize,
+        WdkTypes::SECTION_INHERIT SectionInherit,
+        ULONG AllocationType,
+        ULONG Win32Protect
+    ) {
+        if (!hSection || !BaseAddress) return FALSE;
+        KB_MAP_VIEW_OF_SECTION_IN Input = {};
+        KB_MAP_VIEW_OF_SECTION_OUT Output = {};
+        Input.hSection = hSection;
+        Input.hProcess = hProcess;
+        Input.BaseAddress = *BaseAddress;
+        Input.CommitSize = CommitSize;
+        Input.SectionOffset = SectionOffset ? *SectionOffset : 0;
+        Input.ViewSize = ViewSize ? *ViewSize : 0;
+        Input.SectionInherit = SectionInherit;
+        Input.AllocationType = AllocationType;
+        Input.Win32Protect = Win32Protect;
+        BOOL Status = KbSendRequest(Ctls::KbMapViewOfSection, &Input, sizeof(Input), &Output, sizeof(Output));
+        *BaseAddress = Output.BaseAddress;
+        if (SectionOffset) *SectionOffset = Output.SectionOffset;
+        if (ViewSize) *ViewSize = Output.ViewSize;
+        return Status;
+    }
+
+    BOOL WINAPI KbUnmapViewOfSection(
+        WdkTypes::HANDLE hProcess,
+        WdkTypes::PVOID BaseAddress
+    ) {
+        KB_UNMAP_VIEW_OF_SECTION_IN Input = {};
+        Input.hProcess = hProcess;
+        Input.BaseAddress = BaseAddress;
+        return KbSendRequest(Ctls::KbUnmapViewOfSection, &Input, sizeof(Input));
     }
 }
 
